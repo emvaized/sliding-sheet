@@ -204,6 +204,9 @@ class SlidingSheet extends StatefulWidget {
   /// {@endtemplate}
   final OnDismissPreventedCallback onDismissPrevented;
 
+  /// Sets the opacity for sheet background when it's minimized
+  final double collapsedPanelOpacity;
+
   /// Creates a sheet than can be dragged and scrolled in a single gesture to be
   /// placed inside you widget tree.
   ///
@@ -260,6 +263,7 @@ class SlidingSheet extends StatefulWidget {
     Widget body,
     ParallaxSpec parallaxSpec,
     double axisAlignment = 0.0,
+    double collapsedPanelOpacity = 1.0
   }) : this._(
           key: key,
           builder: builder,
@@ -288,6 +292,7 @@ class SlidingSheet extends StatefulWidget {
           body: body,
           parallaxSpec: parallaxSpec,
           axisAlignment: axisAlignment,
+      collapsedPanelOpacity: collapsedPanelOpacity
         );
 
   SlidingSheet._({
@@ -321,6 +326,7 @@ class SlidingSheet extends StatefulWidget {
     this.route,
     this.isDismissable = true,
     this.onDismissPrevented,
+    this.collapsedPanelOpacity = 1.0
   })  : assert(builder != null),
         assert(duration != null),
         assert(snapSpec != null),
@@ -840,6 +846,19 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
   Widget _buildSheet() {
     final scrollingContent = _buildScrollView();
 
+    double collapsedOpacity = widget.collapsedPanelOpacity;
+    double opacity = 0.0;
+    if (!widget.isDismissable && !dismissUnderway && didCompleteInitialRoute) {
+      opacity = 1.0;
+    } else if (currentExtent != 0.0) {
+      if (fromBottomSheet) {
+        opacity = (currentExtent / minExtent).clamp(0.0, 1.0);
+      } else {
+        final secondarySnap = snappings.length > 2 ? snappings[1] : maxExtent;
+        opacity = ((currentExtent - minExtent) / (secondarySnap - minExtent)).clamp(0.0, 1.0);
+      }
+    }
+
     return Align(
       alignment: Alignment(widget.axisAlignment, -1.0),
       child: ConstrainedBox(
@@ -857,30 +876,34 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                     ? (1 - (currentExtent.clamp(0.0, headerFooterExtent) / headerFooterExtent))
                     : 0.0,
               ),
-              child: _SheetContainer(
-                color: widget.color ?? Colors.white,
-                border: widget.border,
-                margin: widget.margin,
-                padding: EdgeInsets.fromLTRB(
-                  padding.left,
-                  header != null ? padding.top : 0.0,
-                  padding.right,
-                  footer != null ? padding.bottom : 0.0,
-                ),
-                elevation: widget.elevation,
-                shadowColor: widget.shadowColor,
-                customBorders: BorderRadius.vertical(
-                  top: Radius.circular(cornerRadius),
-                ),
-                child: Stack(
+              child: Stack(
                   children: <Widget>[
-                    Column(
-                      children: <Widget>[
-                        SizedBox(height: headerHeight),
-                        Expanded(child: scrollingContent),
-                        SizedBox(height: footerHeight),
-                      ],
-                    ),
+                    Opacity(
+                      opacity: collapsedOpacity + opacity * (1.0 - collapsedOpacity),
+                      child: _SheetContainer(
+                          color: widget.color ?? Colors.white,
+                          border: widget.border,
+                          margin: widget.margin,
+                          padding: EdgeInsets.fromLTRB(
+                            padding.left,
+                            header != null ? padding.top : 0.0,
+                            padding.right,
+                            footer != null ? padding.bottom : 0.0,
+                          ),
+                          elevation: widget.elevation,
+                          shadowColor: widget.shadowColor,
+                          customBorders: BorderRadius.vertical(
+                            top: Radius.circular(cornerRadius),
+                          ),
+                      child: Column(
+                        children: <Widget>[
+                          SizedBox(height: headerHeight),
+                          Expanded(child: scrollingContent),
+                          SizedBox(height: footerHeight),
+                        ],
+                      ),
+                      )),
+
                     if (header != null)
                       Align(
                         alignment: Alignment.topCenter,
@@ -899,7 +922,6 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                       ),
                   ],
                 ),
-              ),
             ),
           ),
         ),
