@@ -36,6 +36,9 @@ class SlidingSheet extends StatefulWidget {
   /// {@endtemplate}
   final SheetBuilder headerBuilder;
 
+  /// Second header to be shown when sheet is collapsed
+  final SheetBuilder collapsedHeaderBuilder;
+
   /// {@template sliding_sheet.footerBuilder}
   /// The builder for a footer that will be displayed at the bottom of the sheet
   /// that wont be scrolled.
@@ -239,6 +242,7 @@ class SlidingSheet extends StatefulWidget {
     Key key,
     @required SheetBuilder builder,
     SheetBuilder headerBuilder,
+    SheetBuilder collapsedHeaderBuilder,
     SheetBuilder footerBuilder,
     SnapSpec snapSpec = const SnapSpec(),
     Duration duration = const Duration(milliseconds: 1000),
@@ -268,6 +272,7 @@ class SlidingSheet extends StatefulWidget {
           key: key,
           builder: builder,
           headerBuilder: headerBuilder,
+      collapsedHeaderBuilder: collapsedHeaderBuilder,
           footerBuilder: footerBuilder,
           snapSpec: snapSpec,
           duration: duration,
@@ -299,6 +304,7 @@ class SlidingSheet extends StatefulWidget {
     Key key,
     @required this.builder,
     @required this.headerBuilder,
+    this.collapsedHeaderBuilder,
     @required this.footerBuilder,
     @required this.snapSpec,
     @required this.duration,
@@ -348,6 +354,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
 
   Widget child;
   Widget header;
+  Widget collapsedHeader;
   Widget footer;
   BuildContext _context;
 
@@ -355,6 +362,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
 
   double childHeight = 0;
   double headerHeight = 0;
+  double collapsedHeaderHeight = 0;
   double footerHeight = 0;
   double availableHeight = 0;
 
@@ -707,6 +715,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
   void _callBuilders() {
     if (_context != null) {
       header = _delegateInteractions(widget.headerBuilder?.call(_context, state));
+      collapsedHeader = _delegateInteractions(widget.collapsedHeaderBuilder?.call(_context, state));
       footer = _delegateInteractions(widget.footerBuilder?.call(_context, state));
       child = widget.builder?.call(_context, state);
     }
@@ -886,7 +895,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                           margin: widget.margin,
                           padding: EdgeInsets.fromLTRB(
                             padding.left,
-                            header != null ? padding.top : 0.0,
+                            header != null || collapsedHeader != null ? padding.top : 0.0,
                             padding.right,
                             footer != null ? padding.bottom : 0.0,
                           ),
@@ -904,7 +913,28 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                       ),
                       )),
 
-                    if (header != null)
+                    if (header != null && collapsedHeader != null)
+                      Stack(children: <Widget>[
+                        Opacity(
+                            opacity: opacity,
+                            child: Align(
+                          alignment: Alignment.topCenter,
+                          child: SizeChangedLayoutNotifier(
+                            key: headerKey,
+                            child: IgnorePointer(ignoring: opacity < 0.5, child: header),
+                          ),
+                        )),
+                        Opacity(
+                            opacity: 1.0 - opacity,
+                            child: Align(
+                          alignment: Alignment.topCenter,
+                          child: SizeChangedLayoutNotifier(
+                            child: IgnorePointer(ignoring: opacity > 0.5, child: collapsedHeader),
+                          ),
+                        )),
+                      ],),
+
+                    if (header != null && collapsedHeader == null)
                       Align(
                         alignment: Alignment.topCenter,
                         child: SizeChangedLayoutNotifier(
@@ -934,7 +964,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
       controller: controller,
       physics: scrollSpec.physics ?? const ScrollPhysics(),
       padding: EdgeInsets.only(
-        top: header == null ? padding.top : 0.0,
+        top: header == null && collapsedHeader == null ? padding.top : 0.0,
         bottom: footer == null ? padding.bottom : 0.0,
       ),
       child: ConstrainedBox(
