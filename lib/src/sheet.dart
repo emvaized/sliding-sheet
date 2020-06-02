@@ -942,6 +942,16 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                           child: header,
                         ),
                       ),
+                    if (header == null && collapsedHeader != null)
+                      Opacity(
+                          opacity: 1.0 - opacity,
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: SizeChangedLayoutNotifier(
+                              key: headerKey,
+                              child: IgnorePointer(ignoring: opacity > 0.5, child: collapsedHeader),
+                            ),
+                          )),
                     if (footer != null)
                       Align(
                         alignment: Alignment.bottomCenter,
