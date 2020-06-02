@@ -1025,6 +1025,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
       // ignore: sort_child_properties_last
       child: widget.body,
       builder: (context, _, body) {
+        final isBodyFaded = spec.fadeBody;
         final amount = spec.amount;
         final defaultMaxExtent = snappings.length > 2 ? snappings[snappings.length - 2] : this.maxExtent;
         final maxExtent = spec.endExtent != null ? _normalizeSnap(spec.endExtent) : defaultMaxExtent;
@@ -1032,10 +1033,16 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
         final maxOffset = (maxExtent - minExtent) * availableHeight;
         final fraction = ((currentExtent - minExtent) / (maxExtent - minExtent)).clamp(0.0, 1.0);
 
-        return Padding(
-          padding: EdgeInsets.only(bottom: (amount * maxOffset) * fraction),
-          child: body,
+        return Transform.translate(
+          offset: Offset(0.0, -(amount * maxOffset) * fraction),
+          child: Opacity(
+              opacity: isBodyFaded ? 1.0 - fraction : 1.0,
+              child: body),
         );
+//        return Padding(
+//          padding: EdgeInsets.only(bottom: (amount * maxOffset) * fraction),
+//          child: body,
+//        );
       },
     );
   }
