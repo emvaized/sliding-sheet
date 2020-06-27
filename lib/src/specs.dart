@@ -35,7 +35,10 @@ class SnapSpec {
   /// On a [SlidingSheet] this will correspond to the initial extent of the
   /// sheet. On a [SlidingSheetDialog] this will be the first extent that
   /// the dialog is animating to.
-  final double initialExtent;
+  ///
+  /// The value must be included in the [snappings] array, otherwise the sheet will
+  /// animate immidiately to the next valid snap.
+  final double initialSnap;
 
   /// How the snaps will be positioned:
   /// - [SnapPositioning.relativeToAvailableSpace] positions the snaps relative to the total
@@ -51,7 +54,7 @@ class SnapSpec {
   const SnapSpec({
     this.snap = true,
     this.snappings = const [0.4, 1.0],
-    this.initialExtent,
+    this.initialSnap,
     this.positioning = SnapPositioning.relativeToAvailableSpace,
     this.onSnap,
   })  : assert(snap != null),
@@ -82,7 +85,7 @@ class SnapSpec {
     return SnapSpec(
       snap: snap ?? this.snap,
       snappings: snappings ?? this.snappings,
-      initialExtent: initialExtent ?? this.initialExtent,
+      initialSnap: initialExtent ?? this.initialSnap,
       positioning: positioning ?? this.positioning,
       onSnap: onSnap ?? this.onSnap,
     );
@@ -90,7 +93,7 @@ class SnapSpec {
 
   @override
   String toString() {
-    return 'SnapSpec(snap: $snap, snappings: $snappings, initialExtent: $initialExtent, positioning: $positioning, onSnap: $onSnap)';
+    return 'SnapSpec(snap: $snap, snappings: $snappings, initialExtent: $initialSnap, positioning: $positioning, onSnap: $onSnap)';
   }
 
   @override
@@ -100,14 +103,14 @@ class SnapSpec {
     return o is SnapSpec &&
         o.snap == snap &&
         listEquals(o.snappings, snappings) &&
-        o.initialExtent == initialExtent &&
+        o.initialSnap == initialSnap &&
         o.positioning == positioning &&
         o.onSnap == onSnap;
   }
 
   @override
   int get hashCode {
-    return snap.hashCode ^ snappings.hashCode ^ initialExtent.hashCode ^ positioning.hashCode ^ onSnap.hashCode;
+    return snap.hashCode ^ snappings.hashCode ^ initialSnap.hashCode ^ positioning.hashCode ^ onSnap.hashCode;
   }
 }
 
@@ -171,6 +174,10 @@ class ParallaxSpec {
   /// would be moved with half the speed of the [SlidingSheet].
   final double amount;
 
+
+  /// Fades out body as parallax goes on
+  final bool fadeBody;
+
   /// The parallax effect will be applied between [minExtent..endExtent] where the minExtent
   /// is defined by the lowest snap in the `snappings` array on the [SnapSpec].
   ///
@@ -183,20 +190,21 @@ class ParallaxSpec {
   const ParallaxSpec({
     this.enabled = true,
     this.amount = 0.15,
+    this.fadeBody = false,
     this.endExtent,
   })  : assert(enabled != null),
         assert(amount >= 0.0 && amount <= 1.0);
 
   @override
-  String toString() => 'ParallaxSpec(enabled: $enabled, amount: $amount, extent: $endExtent)';
+  String toString() => 'ParallaxSpec(enabled: $enabled, amount: $amount, extent: $endExtent, fadeBody: $fadeBody)';
 
   @override
   bool operator ==(Object o) {
     if (identical(this, o)) return true;
 
-    return o is ParallaxSpec && o.enabled == enabled && o.amount == amount && o.endExtent == endExtent;
+    return o is ParallaxSpec && o.enabled == enabled && o.amount == amount && o.endExtent == endExtent && o.fadeBody == fadeBody;
   }
 
   @override
-  int get hashCode => enabled.hashCode ^ amount.hashCode ^ endExtent.hashCode;
+  int get hashCode => enabled.hashCode ^ amount.hashCode ^ endExtent.hashCode ^ fadeBody.hashCode;
 }
