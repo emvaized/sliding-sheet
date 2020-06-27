@@ -15,6 +15,8 @@ part 'specs.dart';
 
 typedef SheetBuilder = Widget Function(BuildContext context, SheetState state);
 
+typedef CustomScrollbarBuilder = Widget Function(BuildContext context, SheetState state, _SlidingSheetScrollController controller, Widget child);
+
 typedef SheetListener = void Function(SheetState state);
 
 typedef OnDismissPreventedCallback = void Function(bool backButton, bool backDrop);
@@ -30,11 +32,32 @@ class SlidingSheet extends StatefulWidget {
   /// {@endtemplate}
   final SheetBuilder builder;
 
+  /// Builder for custom scrollbars, wraps whole widget returned by 'builder' function.
+  /// 'customScrollbarBuilder comes with 'controller' parameter, which provides access to the inner ScrollController of sheet.
+  /// Keep in mind that 'builder' wraps it's child in SingleChildScrollView(), so your custom scrollbar must be able to work with this widget as its child.
+  ///
+  /// If you want to use it with draggable_scrollbar package (https://pub.dev/packages/draggable_scrollbar),
+  /// then manually change it's 'child' type from 'BoxScrollView' to 'SingleChildScrollView' in the source file.
+  /// Then use it like this:
+  /// SlidingSheet(
+  ///   ...
+  ///    customScrollbarBuilder: (context, state, scrollController, child) {
+  ///      return DraggableScrollbar.semicircle(
+  ///          controller: scrollController,
+  ///          child: child
+  ///     },
+  ///   ...
+  /// )
+  final CustomScrollbarBuilder customScrollbarBuilder;
+
   /// {@template sliding_sheet.headerBuilder}
   /// The builder for a header that will be displayed at the top of the sheet
   /// that wont be scrolled.
   /// {@endtemplate}
   final SheetBuilder headerBuilder;
+
+  /// Second header to be shown when sheet is collapsed
+  final SheetBuilder collapsedHeaderBuilder;
 
   /// {@template sliding_sheet.footerBuilder}
   /// The builder for a footer that will be displayed at the bottom of the sheet
@@ -204,6 +227,17 @@ class SlidingSheet extends StatefulWidget {
   /// {@endtemplate}
   final OnDismissPreventedCallback onDismissPrevented;
 
+  /// Sets the opacity for sheet background when it's minimized
+  final double collapsedPanelOpacity;
+
+  /// When enabled, sheet's children are faded out as sheet slides down.
+  /// Enable this if you don't want sheet's content to be visible when collapsed.
+  final bool fadeContentOnCollapse;
+
+
+  final bool glassyStyle;
+
+
   /// Creates a sheet than can be dragged and scrolled in a single gesture to be
   /// placed inside you widget tree.
   ///
@@ -236,12 +270,15 @@ class SlidingSheet extends StatefulWidget {
     Key key,
     @required SheetBuilder builder,
     SheetBuilder headerBuilder,
+    SheetBuilder collapsedHeaderBuilder,
     SheetBuilder footerBuilder,
+    CustomScrollbarBuilder customScrollbarBuilder,
     SnapSpec snapSpec = const SnapSpec(),
     Duration duration = const Duration(milliseconds: 1000),
     Color color = Colors.white,
     Color backdropColor,
     Color shadowColor = Colors.black54,
+    Curve curve = Curves.easeInCubic,
     double elevation = 0.0,
     EdgeInsets padding,
     bool addTopViewPaddingOnFullscreen = false,
@@ -260,10 +297,15 @@ class SlidingSheet extends StatefulWidget {
     Widget body,
     ParallaxSpec parallaxSpec,
     double axisAlignment = 0.0,
+    double collapsedPanelOpacity = 1.0,
+    bool fadeContentOnCollapse = false,
+    bool glassyStyle
   }) : this._(
           key: key,
           builder: builder,
+      customScrollbarBuilder: customScrollbarBuilder,
           headerBuilder: headerBuilder,
+      collapsedHeaderBuilder: collapsedHeaderBuilder,
           footerBuilder: footerBuilder,
           snapSpec: snapSpec,
           duration: duration,
@@ -288,12 +330,17 @@ class SlidingSheet extends StatefulWidget {
           body: body,
           parallaxSpec: parallaxSpec,
           axisAlignment: axisAlignment,
-        );
+      collapsedPanelOpacity: collapsedPanelOpacity,
+      fadeContentOnCollapse: fadeContentOnCollapse,
+      glassyStyle: glassyStyle
+  );
 
   SlidingSheet._({
     Key key,
     @required this.builder,
     @required this.headerBuilder,
+    this.collapsedHeaderBuilder,
+    this.customScrollbarBuilder,
     @required this.footerBuilder,
     @required this.snapSpec,
     @required this.duration,
@@ -321,6 +368,9 @@ class SlidingSheet extends StatefulWidget {
     this.route,
     this.isDismissable = true,
     this.onDismissPrevented,
+    this.collapsedPanelOpacity = 1.0,
+    this.fadeContentOnCollapse = false,
+    this.glassyStyle = false
   })  : assert(builder != null),
         assert(duration != null),
         assert(snapSpec != null),
@@ -342,13 +392,17 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
 
   Widget child;
   Widget header;
+  Widget collapsedHeader;
   Widget footer;
+
+  Widget customScrollBar;
   BuildContext _context;
 
   List<double> snappings;
 
   double childHeight = 0;
   double headerHeight = 0;
+  double collapsedHeaderHeight = 0;
   double footerHeight = 0;
   double availableHeight = 0;
 
@@ -381,7 +435,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
   double get headerFooterExtent => headerExtent + footerExtent;
   double get minExtent => snappings[fromBottomSheet ? 1 : 0].clamp(0.0, 1.0);
   double get maxExtent => snappings.last.clamp(0.0, 1.0);
-  double get initialExtent => snapSpec.initialExtent != null ? _normalizeSnap(snapSpec.initialExtent) : minExtent;
+  double get initialExtent => snapSpec.initialSnap != null ? _normalizeSnap(snapSpec.initialSnap) : minExtent;
 
   bool get fromBottomSheet => widget.route != null;
   ScrollSpec get scrollSpec => widget.scrollSpec;
@@ -416,6 +470,9 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
     ).transform(currentExtent);
   }
 
+  /// Opacity value for backdrop, sheet content, background and collapsedHeader
+  double opacity = 0.0;
+
   // The current state of this sheet.
   SheetState get state => SheetState(
         extent,
@@ -443,6 +500,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
           final state = this.state;
           widget.listener?.call(state);
           sheetController?._state = state;
+
         });
       }
     }
@@ -536,7 +594,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
     void isValidRelativeSnap([String message]) {
       assert(
         SnapSpec._isSnap(snap) || (snap >= 0.0 && snap <= 1.0),
-        message ?? 'Relative snap $snap is not between 0 and 1.',
+        message ?? 'Relative snap $snap is not in the range [0..1].',
       );
     }
 
@@ -623,6 +681,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
     };
     sheetController._expand = () => snapToExtent(maxExtent);
     sheetController._collapse = () => snapToExtent(minExtent);
+    sheetController?._controller = controller;
 
     if (!fromBottomSheet) {
       sheetController._rebuild = rebuild;
@@ -645,6 +704,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
         0,
         duration: duration,
         curve: Curves.easeInCubic,
+      //  curve: Curves.easeInOut,
       );
     }
 
@@ -700,7 +760,8 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
 
   void _callBuilders() {
     if (_context != null) {
-      header = _delegateInteractions(widget.headerBuilder?.call(_context, state));
+      header = _delegateInteractions(widget.headerBuilder?.call(_context, state,));
+      collapsedHeader = _delegateInteractions(widget.collapsedHeaderBuilder?.call(_context, state));
       footer = _delegateInteractions(widget.footerBuilder?.call(_context, state));
       child = widget.builder?.call(_context, state);
     }
@@ -740,6 +801,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
   }
 
   void _onDismissPrevented({bool backButton = false, bool backDrop = false}) {
+
     widget.onDismissPrevented?.call(backButton, backDrop);
   }
 
@@ -839,7 +901,6 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
 
   Widget _buildSheet() {
     final scrollingContent = _buildScrollView();
-
     return Align(
       alignment: Alignment(widget.axisAlignment, -1.0),
       child: ConstrainedBox(
@@ -857,31 +918,65 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                     ? (1 - (currentExtent.clamp(0.0, headerFooterExtent) / headerFooterExtent))
                     : 0.0,
               ),
-              child: _SheetContainer(
-                color: widget.color ?? Colors.white,
-                border: widget.border,
-                margin: widget.margin,
-                padding: EdgeInsets.fromLTRB(
-                  padding.left,
-                  header != null ? padding.top : 0.0,
-                  padding.right,
-                  footer != null ? padding.bottom : 0.0,
-                ),
-                elevation: widget.elevation,
-                shadowColor: widget.shadowColor,
-                customBorders: BorderRadius.vertical(
-                  top: Radius.circular(cornerRadius),
-                ),
-                child: Stack(
+              child: Stack(
                   children: <Widget>[
-                    Column(
+                    Opacity(
+                      opacity: widget.glassyStyle ? 1.0 : widget.collapsedPanelOpacity + opacity * (1.0 - widget.collapsedPanelOpacity),
+                      child: _SheetContainer(
+                        opacity: opacity,
+                        glassy: widget.glassyStyle,
+                          color: widget.color ?? Colors.white,
+                          border: widget.border,
+                          margin: widget.margin,
+                          padding: EdgeInsets.fromLTRB(
+                            padding.left,
+                            header != null || collapsedHeader != null ? padding.top : 0.0,
+                            padding.right,
+                            footer != null ? padding.bottom : 0.0,
+                          ),
+                          elevation: widget.elevation,
+                          shadowColor: widget.shadowColor,
+                          customBorders: BorderRadius.vertical(
+                            top: Radius.circular(cornerRadius),
+                          ),
+                        child: Container(height: childHeight + headerHeight + footerHeight),
+                      )),
+
+                    Opacity(
+                      opacity: widget.fadeContentOnCollapse ? opacity : 1.0,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.max,
                       children: <Widget>[
-                        SizedBox(height: headerHeight),
+                        SizedBox(height: headerHeight / 1.10),
                         Expanded(child: scrollingContent),
+
                         SizedBox(height: footerHeight),
                       ],
                     ),
-                    if (header != null)
+                    ),
+
+                    if (header != null && collapsedHeader != null)
+                      Stack(children: <Widget>[
+                        Opacity(
+                            opacity: collapsedHeader!= null ? opacity : 1.0,
+                            child: Align(
+                          alignment: Alignment.topCenter,
+                          child: SizeChangedLayoutNotifier(
+                            key: headerKey,
+                            child: IgnorePointer(ignoring: opacity < 0.5, child: header),
+                          ),
+                        )),
+                        Opacity(
+                            opacity: 1.0 - opacity,
+                            child: Align(
+                          alignment: Alignment.topCenter,
+                          child: SizeChangedLayoutNotifier(
+                            child: IgnorePointer(ignoring: opacity > 0.5, child: collapsedHeader),
+                          ),
+                        )),
+                      ],),
+
+                    if (header != null && collapsedHeader == null)
                       Align(
                         alignment: Alignment.topCenter,
                         child: SizeChangedLayoutNotifier(
@@ -889,6 +984,16 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                           child: header,
                         ),
                       ),
+                    if (header == null && collapsedHeader != null)
+                      Opacity(
+                          opacity: 1.0 - opacity,
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: SizeChangedLayoutNotifier(
+                              key: headerKey,
+                              child: IgnorePointer(ignoring: opacity > 0.5, child: collapsedHeader),
+                            ),
+                          )),
                     if (footer != null)
                       Align(
                         alignment: Alignment.bottomCenter,
@@ -899,7 +1004,6 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                       ),
                   ],
                 ),
-              ),
             ),
           ),
         ),
@@ -908,27 +1012,34 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
   }
 
   Widget _buildScrollView() {
-    Widget scrollView = SingleChildScrollView(
-      controller: controller,
-      physics: scrollSpec.physics ?? const ScrollPhysics(),
-      padding: EdgeInsets.only(
-        top: header == null ? padding.top : 0.0,
-        bottom: footer == null ? padding.bottom : 0.0,
-      ),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(minHeight: widget.minHeight ?? 0.0),
-        child: SizeChangedLayoutNotifier(
-          key: childKey,
-          child: child,
-        ),
-      ),
-    );
+     Widget scrollView = SingleChildScrollView(
 
-    if (scrollSpec.showScrollbar) {
-      scrollView = Scrollbar(
-        child: scrollView,
-      );
-    }
+          controller: controller,
+          physics: scrollSpec.physics ?? const ScrollPhysics(),
+          padding: EdgeInsets.only(
+            top: header == null && collapsedHeader == null ? padding.top : 0.0,
+            bottom: footer == null ? padding.bottom : 0.0,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                //maxHeight: MediaQuery.of(context).size.height,
+                minHeight: widget.minHeight ?? 0.0),
+            child: SizeChangedLayoutNotifier(
+              key: childKey,
+              child: child,
+            ),
+          ),
+        );
+
+
+     if (widget.customScrollbarBuilder != null) {
+       scrollView = widget.customScrollbarBuilder?.call(_context, state, controller, scrollView);
+     }
+     else if (scrollSpec.showScrollbar) {
+       scrollView = Scrollbar(
+           child: scrollView
+       );
+     }
 
     scrollView = Listener(
       onPointerUp: (event) => _handleNonDismissableSnapBack(),
@@ -963,6 +1074,7 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
       // ignore: sort_child_properties_last
       child: widget.body,
       builder: (context, _, body) {
+        final isBodyFaded = spec.fadeBody;
         final amount = spec.amount;
         final defaultMaxExtent = snappings.length > 2 ? snappings[snappings.length - 2] : this.maxExtent;
         final maxExtent = spec.endExtent != null ? _normalizeSnap(spec.endExtent) : defaultMaxExtent;
@@ -970,16 +1082,26 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
         final maxOffset = (maxExtent - minExtent) * availableHeight;
         final fraction = ((currentExtent - minExtent) / (maxExtent - minExtent)).clamp(0.0, 1.0);
 
-        return Padding(
-          padding: EdgeInsets.only(bottom: (amount * maxOffset) * fraction),
-          child: body,
+
+//        if (widget.glassyStyle)
+//          return Transform.translate(
+//            offset: Offset(0.0, -(amount * maxOffset) * fraction),
+//            child: ClipRect(child: RepaintBoundary(child: BackdropFilter(
+//                filter: new ImageFilter.blur(sigmaX: 10.0 * fraction, sigmaY: 10.0 *fraction),
+//                child:body))),
+//          );
+
+        return Transform.translate(
+          offset: Offset(0.0, -(amount * maxOffset) * fraction),
+          child: Opacity(
+              opacity: isBodyFaded ? 1.0 - fraction : 1.0,
+              child: body),
         );
       },
     );
   }
 
   Widget _buildBackdrop() {
-    double opacity = 0.0;
     if (!widget.isDismissable && !dismissUnderway && didCompleteInitialRoute) {
       opacity = 1.0;
     } else if (currentExtent != 0.0) {
@@ -991,31 +1113,48 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
       }
     }
 
-    final backDrop = IgnorePointer(
-      ignoring: opacity < 0.05,
-      child: Opacity(
-        opacity: opacity,
-        child: Container(
-          width: double.infinity,
-          height: double.infinity,
-          color: widget.backdropColor,
+      final backDrop = widget.glassyStyle ? IgnorePointer(
+        ignoring: opacity < 0.05,
+        child: BackdropFilter(
+            filter: new ImageFilter.blur(sigmaX: 5.0 * opacity, sigmaY: 5.0 * opacity),
+            child: Opacity(
+              opacity: opacity,
+              child: Container(
+                width: double.infinity,
+                height: double.infinity,
+                color: widget.backdropColor,
+              ),
+            ))
+      ) : IgnorePointer(
+        ignoring: opacity < 0.05,
+        child: Opacity(
+          opacity: opacity,
+          child: Container(
+            width: double.infinity,
+            height: double.infinity,
+            color: widget.backdropColor,
+          ),
         ),
-      ),
-    );
+      );
 
-    void onTap() => widget.isDismissable ? _pop(0.0) : _onDismissPrevented(backDrop: true);
+    void onTap() =>  widget.isDismissable ? _pop(0.0) : _onDismissPrevented(backDrop: true);
+
+   // return backDrop;
+     // return _delegateInteractions(backDrop, onTap: widget.closeOnBackdropTap ? opacity < 0.05 ? null : onTap : null);
 
     // see: https://github.com/BendixMa/sliding-sheet/issues/30
     if (opacity >= 0.05 || didStartDragWhenNotCollapsed) {
+    //if (didStartDragWhenNotCollapsed) {
       if (widget.isBackdropInteractable) {
         return _delegateInteractions(backDrop, onTap: widget.closeOnBackdropTap ? onTap : null);
-      } else if (widget.closeOnBackdropTap) {
-        return GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.translucent,
-          child: backDrop,
-        );
       }
+//      else if (widget.closeOnBackdropTap) {
+//        return GestureDetector(
+//          onTap: onTap,
+//          behavior: HitTestBehavior.translucent,
+//          child: backDrop,
+//        );
+//      }
     }
 
     return backDrop;
@@ -1028,15 +1167,16 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
     double end = 0;
 
     void onDragEnd([double velocity = 0.0]) {
-      controller.delegateFling(velocity);
+        controller.delegateFling(velocity);
 
-      // If a header was dragged, but the scroll view is not at the top
-      // animate to the top when the drag has ended.
-      if (!state.isAtTop && (start - end).abs() > 15) {
-        controller.animateTo(0.0, duration: widget.duration * .5, curve: Curves.ease);
-      }
+        // If a header was dragged, but the scroll view is not at the top
+        // animate to the top when the drag has ended.
+        if (!state.isAtTop && (start - end).abs() > 15) {
+          controller.animateTo(
+              0.0, duration: widget.duration * .5, curve: Curves.ease);
+        }
 
-      _handleNonDismissableSnapBack();
+        _handleNonDismissableSnapBack();
     }
 
     return GestureDetector(
@@ -1047,18 +1187,25 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
         end = start;
 
         didStartDragWhenNotCollapsed = currentExtent > snappings.first;
-      },
-      onVerticalDragUpdate: (details) {
-        end = details.localPosition.dy;
-        final delta = details.delta.dy;
+      } ,
+      onVerticalDragUpdate:(details) {
+          end = details.localPosition.dy;
+          final delta = details.delta.dy;
 
-        // Do not delegate upward drag when the sheet is fully expanded
-        // because headers or backdrops should not be able to scroll the
-        // sheet, only to drag it between min and max extent.
-        final shouldDelegate = !delta.isNegative || currentExtent < maxExtent;
-        if (shouldDelegate) {
-          controller.delegateDrag(delta);
-        }
+          // Do not delegate upward drag when the sheet is fully expanded
+          // because headers or backdrops should not be able to scroll the
+          // sheet, only to drag it between min and max extent.
+          final shouldDelegate = !delta.isNegative || currentExtent < maxExtent;
+
+//          if (delta > 0.0 && opacity < 0.05) {
+//            //print(details.delta.dy);
+//            widget.swipeDownOnBodyCallback(details);
+//          } else
+
+
+          if (shouldDelegate) {
+            controller.delegateDrag(delta);
+          }
       },
       onVerticalDragEnd: (details) {
         final deltaY = details.velocity.pixelsPerSecond.dy;
@@ -1213,6 +1360,9 @@ class SheetController {
 
   SheetState _state;
   SheetState get state => _state;
+
+  _SlidingSheetScrollController _controller;
+  _SlidingSheetScrollController get scrollController => _controller;
 }
 
 /// A custom [Container] for a [SlidingSheet].
@@ -1229,6 +1379,8 @@ class _SheetContainer extends StatelessWidget {
   final List<BoxShadow> boxShadows;
   final AlignmentGeometry alignment;
   final BoxConstraints constraints;
+  final bool glassy;
+  final double opacity;
   const _SheetContainer({
     Key key,
     this.borderRadius = 0.0,
@@ -1243,6 +1395,8 @@ class _SheetContainer extends StatelessWidget {
     this.boxShadows,
     this.alignment,
     this.constraints,
+    this.glassy = false,
+    this.opacity = 1.0
   }) : super(key: key);
 
   @override
@@ -1258,6 +1412,28 @@ class _SheetContainer extends StatelessWidget {
             ),
           ]
         : const [];
+if (glassy)
+  return ClipRect( child:
+    BackdropFilter(
+        filter: new ImageFilter.blur(sigmaX: 3, sigmaY: 3),
+    child: Container(
+    margin: margin,
+    padding: padding,
+    alignment: alignment,
+    constraints: constraints,
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: br,
+      boxShadow: boxShadow,
+      border: border,
+      shape: BoxShape.rectangle,
+    ),
+    child: ClipRRect(
+      borderRadius: br,
+      child: child,
+    ),
+  )));
+
 
     return Container(
       margin: margin,
