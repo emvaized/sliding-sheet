@@ -947,9 +947,8 @@ class _SlidingSheetState extends State<SlidingSheet> with TickerProviderStateMix
                     child: Column(
                       mainAxisSize: MainAxisSize.max,
                       children: <Widget>[
-                        SizedBox(height: headerHeight / 1.10),
+                       // SizedBox(height: headerHeight / 1.10),
                         Expanded(child: scrollingContent),
-
                         SizedBox(height: footerHeight),
                       ],
                     ),
